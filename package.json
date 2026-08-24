@@ -1,0 +1,17 @@
+{
+  "name": "readme-sync-bot",
+  "version": "1.0.0",
+  "description": "GitHub App that automatically keeps README.md in sync with code changes using AI",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "probot run ./src/index.js",
+    "dev": "probot run ./src/index.js"
+  },
+  "dependencies": {
+    "probot": "^13.0.0",
+    "dotenv": "^16.4.5"
+  }
+}
