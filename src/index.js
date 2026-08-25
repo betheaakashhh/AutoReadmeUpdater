@@ -89,7 +89,7 @@ module.exports = (app) => {
 
 // ─── Core pipeline ────────────────────────────────────────────────────────────
 
-async function process({ context, owner, repo, files, branch, prNumber = null, isFork = false }) {
+async function processEvent({ context, owner, repo, files, branch, prNumber = null, isFork = false }) {
   const octokit = context.octokit;
 
   // Remove the README file itself from the diff so we don't react to our own edits
