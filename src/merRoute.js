@@ -1,6 +1,6 @@
 const router = require('express').Router();
 
-router.get('/api/analyse', (req, res) => {
+router.get('/api/mergese', (req, res) => {
   res.json({ ok: true });
 });
 
