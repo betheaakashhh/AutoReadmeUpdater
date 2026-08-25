@@ -1,77 +1,167 @@
 # README Sync Bot
 
-A GitHub App that watches your repo and keeps `README.md` accurate automatically —
-no more remembering to update docs after every API change, deleted feature, or
-structural refactor.
+A GitHub App that watches your repo and surgically updates `README.md` when meaningful code changes happen — **no AI API, no monthly cost, no guessing.**
 
-## How it behaves
+It uses diff parsing and code analysis to detect real changes, then updates only the affected section of your README.
 
-| Who pushes / acts | What happens |
-|---|---|
-| **Repo owner/admin pushes directly** to the default branch | Diff is analyzed immediately. If significant, README is auto-committed right away. |
-| **Anyone else opens a Pull Request** | Nothing happens until a reviewer **approves** the PR. Once approved, the diff is analyzed and, if significant, the README update is committed (or, for forked PRs the bot can't push to, posted as a suggestion comment). |
-
-"Significant" = new/removed public APIs, endpoints, functions, or classes;
-changed signatures; new modules/folders that change project structure; new
-required config/env vars; new dependencies; removed features; breaking
-changes. Formatting, comments, tests, and typo fixes are ignored.
+---
 
 ## How it works
 
-1. GitHub sends a webhook (`push` or `pull_request_review`) to this app.
-2. The app fetches the diff (`src/diff.js`).
-3. Claude classifies whether the diff is README-worthy, and if so, regenerates
-   the relevant parts of the README (`src/analyzer.js`).
-4. The app commits the new README via the GitHub Contents API, or — for PRs
-   from forks it can't push to — posts the suggested update as a PR comment
-   (`src/index.js`).
+```
+Git push / PR approved
+        │
+        ▼
+  Get changed files
+  (with patches from GitHub API)
+        │
+        ▼
+┌───────────────────────────────┐
+│       Change Classifier        │
+│                                │
+│  routes.js  → API routes       │
+│  env.js     → env variables    │
+│  features.js→ new modules      │
+└──────────────┬────────────────┘
+               │
+    ┌──────────┴──────────┐
+    │                     │
+ Ignore               Significant
+ (low confidence)     (≥ 90% confidence)
+                          │
+                          ▼
+                 Parse README sections
+                          │
+                          ▼
+                 Find affected section
+                 (API / Config / etc.)
+                          │
+                          ▼
+                 Update ONLY that section
+                          │
+                          ▼
+                 Commit or PR comment
+```
 
-## 1. Create the GitHub App
+---
 
-Go to **https://github.com/settings/apps/new** and configure:
+## What it detects
 
-- **Webhook URL**: wherever you deploy this app (e.g. `https://your-app.onrender.com/api/github/webhooks`)
-- **Webhook secret**: generate any random string, save it for `.env`
-- **Permissions**:
+| What changed | Detected how | Confidence | README action |
+|---|---|---|---|
+| New `router.get('/path', ...)` | Regex on diff | 93% | Add to API section |
+| Removed route | Regex on diff | 93% | Remove from API section |
+| Auth middleware added to route | Keyword match on diff | 88% | Add 🔒 badge to entry |
+| New `.env.example` variable | Diff line parsing | 97% | Add row to config table |
+| Removed `.env.example` variable | Diff line parsing | 97% | Remove row from config table |
+| New `src/features/x/` directory | File path heuristic | 75% | Mention in PR comment |
+
+Changes under 90% confidence are **never auto-committed** — they're mentioned in a PR comment for manual review.
+
+---
+
+## What it ignores
+
+- Test files (`*.test.js`, `*.spec.ts`, `__tests__/`)
+- CI / workflow files (`.github/`, `jest.config.*`, `.eslintrc`)
+- Formatting / comments / variable renames
+- Any change to `README.md` itself (no feedback loops)
+
+---
+
+## Who gets what
+
+| Actor | Push event | PR approved |
+|---|---|---|
+| **Repo owner / admin** | README auto-committed immediately | README auto-committed to PR branch |
+| **Contributor (non-admin)** | Ignored on push (must open PR) | README auto-committed after approval |
+| **Fork contributor** | — | Suggested changes posted as PR comment |
+
+---
+
+## Setup
+
+### 1. Register the GitHub App
+
+Go to **https://github.com/settings/apps/new** and fill in:
+
+- **Webhook URL** — your deployment URL + `/api/github/webhooks`
+  (e.g. `https://your-app.onrender.com/api/github/webhooks`)
+- **Webhook secret** — any random string, save it
+- **Repository permissions:**
   - Contents: **Read & write**
   - Pull requests: **Read & write**
-  - Metadata: **Read-only** (required by default)
-- **Subscribe to events**: `Push`, `Pull request review`
-- After creating the app, generate a **private key** (downloads a `.pem` file)
-- Install the app on the repo(s) you want it to manage
+  - Metadata: **Read-only** (auto-selected)
+- **Subscribe to events:** `Push`, `Pull request review`
 
-## 2. Configure environment variables
+After creating the app:
+1. Click **Generate a private key** → downloads a `.pem` file
+2. Install the app on the repos you want it to manage
+
+### 2. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Fill in:
-- `APP_ID` — shown on your app's settings page
-- `PRIVATE_KEY` — contents of the `.pem` file (keep the `\n` line breaks, or point Probot at the file path instead — see [Probot docs](https://probot.github.io/docs/configuration/))
-- `WEBHOOK_SECRET` — the secret you set above
-- `ANTHROPIC_API_KEY` — your Claude API key from [console.anthropic.com](https://console.anthropic.com)
+Edit `.env`:
 
-## 3. Run it
+```env
+APP_ID=         # shown on your app's settings page
+PRIVATE_KEY=    # full contents of the .pem file (keep \n line breaks)
+WEBHOOK_SECRET= # the secret you set above
+```
+
+### 3. Run
 
 ```bash
 npm install
 npm start
 ```
 
-For production, deploy to any Node host that gives you a public HTTPS URL
-(Render, Railway, Fly.io, a small VPS, etc.) and point the GitHub App's
-webhook URL at it.
+Deploy to any Node.js host that can receive HTTPS webhooks (Render, Railway, Fly.io, a small VPS). The free tier on most of these is enough.
 
-## Configuration knobs (`.env`)
+---
 
-- `README_PATH` — defaults to `README.md`; set to e.g. `packages/api/README.md` for monorepos
-- `STRICT_OWNER_ONLY` — `true` (default) means only the literal repo owner or an admin collaborator gets the instant auto-commit-on-push behavior; everyone else's changes always go through the PR-approval path
-- `ANTHROPIC_MODEL` — swap models without touching code
+## Configuration (`env`)
 
-## Notes & limitations
+| Variable | Description | Default |
+|---|---|---|
+| `README_PATH` | Path to README to update | `README.md` |
+| `STRICT_OWNER_ONLY` | Only owner/admin direct pushes auto-commit | `true` |
+| `PORT` | Local server port | `3000` |
 
-- Each significant push/PR costs two Claude API calls (classify + regenerate). Cost scales with diff size and README length.
-- For PRs from forks, the bot can only push if the contributor checked "Allow edits by maintainers" — otherwise it leaves a comment with the suggested README instead.
-- The bot ignores diffs to `README.md` itself, so it won't react to its own commits.
-- To use a different AI provider, only `src/analyzer.js` needs to change — the rest of the app is provider-agnostic.
+---
+
+## Project structure
+
+```
+src/
+├── index.js              Main Probot handler (push + PR review events)
+├── permissions.js        Owner / admin check
+├── classifier.js         Orchestrates all analyzers
+├── analyzers/
+│   ├── routes.js         Express / Fastify route change detection
+│   ├── env.js            .env.example change detection
+│   └── features.js       New feature directory detection
+└── readme/
+    ├── parser.js         Split README into sections by heading
+    ├── generators.js     Markdown templates (table rows, headings, sections)
+    └── updater.js        Surgical per-section update logic
+```
+
+---
+
+## Extending
+
+**Add a new analyzer** (e.g. database schema changes):
+
+1. Create `src/analyzers/schema.js` with an `analyzeSchemaChanges(files)` function that returns change objects `{ type, confidence, reason, ... }`
+2. Import and call it in `src/classifier.js`
+3. Add a case in `src/readme/updater.js` → `applyOne()` to handle the new type
+
+**Support a different framework** (Django, FastAPI, Rails):
+- Add patterns to `src/analyzers/routes.js` → `ROUTE_RE`
+
+**Adjust confidence thresholds**:
+- Edit `src/classifier.js` → `CONFIDENCE` object

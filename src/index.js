@@ -1,155 +1,205 @@
-require("dotenv").config();
+/**
+ * README Sync Bot — main Probot application.
+ *
+ * Two event handlers:
+ *
+ *  push  →  Only fires for the default branch.
+ *           If pusher is the repo owner / admin → auto-commit README changes.
+ *           Otherwise → skip (they must go through a PR).
+ *
+ *  pull_request_review  →  Only fires when state === 'approved'.
+ *                           Analyses the entire PR diff and applies README
+ *                           changes to the PR branch.
+ *                           For forked PRs (where we can't push) the suggested
+ *                           changes are posted as a PR comment instead.
+ *
+ * Pipeline per event:
+ *   changed files → classifyChanges() → applyChanges() → commit / comment
+ */
 
-const { classifyChange, regenerateReadme } = require("./analyzer");
-const { getPushDiff, getPRDiff } = require("./diff");
-const { isOwnerOrAdmin } = require("./permissions");
+require('dotenv').config();
 
-const BOT_COMMIT_MARKER = "[readme-sync-bot]";
-const README_PATH = process.env.README_PATH || "README.md";
-const STRICT_OWNER_ONLY = process.env.STRICT_OWNER_ONLY !== "false";
+const { isOwnerOrAdmin } = require('./permissions');
+const { classifyChanges } = require('./classifier');
+const { applyChanges }    = require('./readme/updater');
+
+const BOT_COMMIT_MARKER = '[readme-sync-bot]';
+const README_PATH        = process.env.README_PATH   || 'README.md';
+const STRICT_OWNER_ONLY  = process.env.STRICT_OWNER_ONLY !== 'false';
 
 /** @param {import('probot').Probot} app */
 module.exports = (app) => {
-  app.log.info("README Sync Bot loaded");
+  app.log.info('README Sync Bot ready (code-analysis mode — no AI API)');
 
-  // ── 1) Direct pushes to the default branch ──────────────────────────────
-  // Owner/admin pushes get auto-committed immediately.
-  app.on("push", async (context) => {
+  // ── 1. Direct push to the default branch ──────────────────────────────────
+  app.on('push', async (context) => {
     const { owner, repo } = context.repo();
     const payload = context.payload;
 
-    if (payload.deleted) return; // branch deletion
+    // Guard: only act on the default branch
+    if (payload.deleted) return;
     if (payload.ref !== `refs/heads/${payload.repository.default_branch}`) return;
-    if (payload.head_commit?.message?.includes(BOT_COMMIT_MARKER)) return; // avoid loops
+    // Guard: don't react to our own commits
+    if (payload.head_commit?.message?.includes(BOT_COMMIT_MARKER)) return;
 
     const before = payload.before;
-    const after = payload.after;
-    if (!before || before === "0000000000000000000000000000000000000000") return; // new branch
+    const after  = payload.after;
+    // Guard: skip brand-new branches (no base to compare against)
+    if (!before || before === '0000000000000000000000000000000000000000') return;
 
+    // Guard: only auto-commit for the owner / admin
     if (STRICT_OWNER_ONLY) {
-      const pusher = payload.sender?.login;
+      const pusher  = payload.sender?.login;
       const trusted = await isOwnerOrAdmin(context.octokit, owner, repo, pusher);
       if (!trusted) {
-        app.log.info(`Push by ${pusher} is not owner/admin — skipping direct auto-commit.`);
+        app.log.info(`Push by '${pusher}' is not owner/admin — requires PR approval flow`);
         return;
       }
     }
 
     try {
-      const diffText = await getPushDiff(context.octokit, owner, repo, before, after);
-      if (!diffText.trim()) return;
-
-      await analyzeAndApply({
-        context,
-        owner,
-        repo,
-        diffText,
-        targetBranch: payload.repository.default_branch,
-        prNumber: null,
-      });
+      const files = await getCompareFiles(context.octokit, owner, repo, before, after);
+      await process({ context, owner, repo, files, branch: payload.repository.default_branch });
     } catch (err) {
-      app.log.error(err, "Failed to process push event");
+      app.log.error(err, 'push handler failed');
     }
   });
 
-  // ── 2) Pull requests — only act once a review is APPROVED ──────────────
-  app.on("pull_request_review", async (context) => {
-    const review = context.payload.review;
-    if (review.state !== "approved") return;
+  // ── 2. Pull-request review approved ───────────────────────────────────────
+  app.on('pull_request_review', async (context) => {
+    if (context.payload.review.state !== 'approved') return;
 
-    const pr = context.payload.pull_request;
+    const pr             = context.payload.pull_request;
     const { owner, repo } = context.repo();
+    const isFork         = pr.head.repo?.full_name !== `${owner}/${repo}`;
 
     try {
-      const diffText = await getPRDiff(context.octokit, owner, repo, pr.number);
-      if (!diffText.trim()) return;
-
-      await analyzeAndApply({
-        context,
-        owner,
-        repo,
-        diffText,
-        targetBranch: pr.head.ref,
+      const files = await getPRFiles(context.octokit, owner, repo, pr.number);
+      await process({
+        context, owner, repo, files,
+        branch:  pr.head.ref,
         prNumber: pr.number,
-        prHeadRepoFullName: pr.head.repo?.full_name,
+        isFork,
       });
     } catch (err) {
-      app.log.error(err, "Failed to process pull_request_review event");
+      app.log.error(err, 'pull_request_review handler failed');
     }
   });
 };
 
-/**
- * Shared logic: classify the diff, and if significant, regenerate and
- * commit the README — either directly (push / same-repo PR branch) or as
- * a suggestion comment (forked PR we can't push to).
- */
-async function analyzeAndApply({ context, owner, repo, diffText, targetBranch, prNumber, prHeadRepoFullName }) {
+// ─── Core pipeline ────────────────────────────────────────────────────────────
+
+async function process({ context, owner, repo, files, branch, prNumber = null, isFork = false }) {
   const octokit = context.octokit;
 
-  const classification = await classifyChange(diffText);
-  if (!classification.significant) {
-    context.log.info(`No README-worthy change detected: ${classification.reason}`);
+  // Remove the README file itself from the diff so we don't react to our own edits
+  const filteredFiles = files.filter(f => f.filename !== README_PATH);
+
+  const { toApply, toSuggest } = classifyChanges(filteredFiles);
+
+  if (toApply.length === 0 && toSuggest.length === 0) {
+    context.log.info('No documentation-worthy changes detected — nothing to do');
     return;
   }
 
-  let currentReadme = "";
+  context.log.info(
+    `Detected ${toApply.length} auto-apply + ${toSuggest.length} suggest-only change(s)`
+  );
+
+  // Fetch the current README (ok if it doesn't exist yet)
+  let currentReadme = '';
   let readmeSha;
   try {
     const { data } = await octokit.repos.getContent({
-      owner,
-      repo,
-      path: README_PATH,
-      ref: targetBranch,
+      owner, repo, path: README_PATH, ref: branch,
     });
-    currentReadme = Buffer.from(data.content, "base64").toString("utf-8");
-    readmeSha = data.sha;
+    currentReadme = Buffer.from(data.content, 'base64').toString('utf-8');
+    readmeSha     = data.sha;
   } catch (err) {
-    if (err.status !== 404) throw err; // 404 just means no README yet — that's fine
+    if (err.status !== 404) throw err;
+    // No README yet — we'll create one
   }
 
-  const updatedReadme = await regenerateReadme(currentReadme, diffText, classification.summary);
-  if (!updatedReadme || updatedReadme.trim() === currentReadme.trim()) return;
+  // Apply high-confidence changes
+  let updatedReadme = currentReadme;
+  let report        = [];
 
-  const isFork = prHeadRepoFullName && prHeadRepoFullName !== `${owner}/${repo}`;
-  if (isFork) {
-    // Can't push to a fork unless the contributor enabled "allow edits by maintainers".
-    await postSuggestionComment(octokit, owner, repo, prNumber, classification, updatedReadme);
-    return;
+  if (toApply.length > 0) {
+    const result  = applyChanges(currentReadme, toApply);
+    updatedReadme = result.content;
+    report        = result.report;
   }
 
-  await octokit.repos.createOrUpdateFileContents({
-    owner,
-    repo,
-    path: README_PATH,
-    message: `docs: update README.md ${BOT_COMMIT_MARKER}\n\n${classification.summary}`,
-    content: Buffer.from(updatedReadme, "utf-8").toString("base64"),
-    sha: readmeSha,
-    branch: targetBranch,
-  });
+  const readmeChanged = updatedReadme !== currentReadme;
 
-  if (prNumber) {
-    await octokit.issues.createComment({
-      owner,
-      repo,
-      issue_number: prNumber,
-      body: `📝 README.md was automatically updated after approval — ${classification.summary}`,
+  // Commit if content actually changed and we can push to this branch
+  if (readmeChanged && !isFork) {
+    await octokit.repos.createOrUpdateFileContents({
+      owner, repo,
+      path:    README_PATH,
+      message: buildCommitMessage(report),
+      content: Buffer.from(updatedReadme, 'utf-8').toString('base64'),
+      sha:     readmeSha,      // undefined = create new file
+      branch,
     });
+    context.log.info('README.md committed successfully');
+  }
+
+  // Post a detailed PR comment when there is a PR
+  if (prNumber) {
+    await postComment(octokit, owner, repo, prNumber, report, toSuggest, isFork, readmeChanged);
   }
 }
 
-async function postSuggestionComment(octokit, owner, repo, prNumber, classification, updatedReadme) {
-  if (!prNumber) return;
-  await octokit.issues.createComment({
-    owner,
-    repo,
-    issue_number: prNumber,
-    body:
-      `📝 **README update suggested** — ${classification.summary}\n\n` +
-      `This PR comes from a fork, so I can't push directly to it. Enable ` +
-      `"Allow edits by maintainers" on the PR, or copy this in manually:\n\n` +
-      `<details><summary>Updated README.md</summary>\n\n` +
-      "```markdown\n" + updatedReadme + "\n```\n" +
-      `</details>`,
+// ─── GitHub API helpers ───────────────────────────────────────────────────────
+
+async function getCompareFiles(octokit, owner, repo, base, head) {
+  const { data } = await octokit.repos.compareCommitsWithBasehead({
+    owner, repo, basehead: `${base}...${head}`,
   });
+  return data.files || [];
+}
+
+async function getPRFiles(octokit, owner, repo, pull_number) {
+  return octokit.paginate(octokit.pulls.listFiles, {
+    owner, repo, pull_number, per_page: 100,
+  });
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildCommitMessage(report) {
+  const summary = report.length === 1
+    ? report[0]
+    : `${report.length} documentation updates`;
+
+  const body = report.map(r => `- ${r}`).join('\n');
+  return `docs: ${summary} ${BOT_COMMIT_MARKER}\n\n${body}`;
+}
+
+async function postComment(octokit, owner, repo, issue_number, applied, suggested, isFork, wasCommitted) {
+  const lines = ['### 🤖 README Sync Bot\n'];
+
+  if (wasCommitted && !isFork && applied.length > 0) {
+    lines.push('**Automatically updated `README.md`:**\n');
+    applied.forEach(r => lines.push(`- ✅ ${r}`));
+  } else if (isFork && applied.length > 0) {
+    lines.push(
+      '**README updates detected, but this PR comes from a fork so I ' +
+      'cannot push directly. Please apply these changes manually:**\n'
+    );
+    applied.forEach(r => lines.push(`- 📝 ${r}`));
+  }
+
+  if (suggested.length > 0) {
+    lines.push('\n**Changes that may need manual review (lower confidence):**\n');
+    suggested.forEach(c =>
+      lines.push(`- ⚠️ ${c.reason} *(${Math.round(c.confidence * 100)}% confidence)*`)
+    );
+  }
+
+  // Nothing worth posting
+  if (lines.length <= 1) return;
+
+  await octokit.issues.createComment({ owner, repo, issue_number, body: lines.join('\n') });
 }
