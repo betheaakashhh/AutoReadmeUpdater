@@ -68,10 +68,10 @@ function applyOne(content, change) {
 
 function addApiRoute(content, change) {
   const { sections, lines } = parseReadme(content);
-  const apiSection = findSection(sections, 'api');
+  const existingApiSection = findSection(sections, 'api');
 
   // ── No API section at all → create one ──────────────────────────────────
-  if (!apiSection) {
+  if (!existingApiSection) {
     return {
       content: content.trimEnd() + '\n' + apiSection([change]),
       changed: true,
@@ -79,8 +79,8 @@ function addApiRoute(content, change) {
     };
   }
 
-  const endLine = getSectionEnd(apiSection, sections, lines.length);
-  const sectionLines = lines.slice(apiSection.startLine, endLine + 1);
+  const endLine = getSectionEnd(existingApiSection, sections, lines.length);
+  const sectionLines = lines.slice(existingApiSection.startLine, endLine + 1);
 
   // ── Table format ─────────────────────────────────────────────────────────
   const tableHeaderIdx = sectionLines.findIndex(l => API_TABLE_HEADER_RE.test(l));
@@ -91,7 +91,7 @@ function addApiRoute(content, change) {
       if (sectionLines[i].startsWith('|')) lastDataRow = i;
       else break;
     }
-    const insertAt = apiSection.startLine + lastDataRow + 1;
+    const insertAt = existingApiSection.startLine + lastDataRow + 1;
     lines.splice(insertAt, 0, apiTableRow(change));
     return {
       content: lines.join('\n'),
