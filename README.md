@@ -1,4 +1,4 @@
-# README Sync Bot
+# README Auto Updater
 
 A GitHub App that watches your repo and surgically updates `README.md` when meaningful code changes happen — **no AI API, no monthly cost, no guessing.**
 

@@ -59,7 +59,7 @@ module.exports = (app) => {
 
     try {
       const files = await getCompareFiles(context.octokit, owner, repo, before, after);
-      await process({ context, owner, repo, files, branch: payload.repository.default_branch });
+      await processEvent({ context, owner, repo, files, branch: payload.repository.default_branch });
     } catch (err) {
       app.log.error(err, 'push handler failed');
     }
@@ -75,7 +75,7 @@ module.exports = (app) => {
 
     try {
       const files = await getPRFiles(context.octokit, owner, repo, pr.number);
-      await process({
+      await processEvent({
         context, owner, repo, files,
         branch:  pr.head.ref,
         prNumber: pr.number,
