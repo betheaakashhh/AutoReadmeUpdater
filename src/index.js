@@ -33,41 +33,62 @@ module.exports = (app) => {
 
   // ── 1. Direct push to the default branch ──────────────────────────────────
   app.on('push', async (context) => {
+    context.log.info('▶ push event received');
+
     const { owner, repo } = context.repo();
     const payload = context.payload;
 
     // Guard: only act on the default branch
-    if (payload.deleted) return;
-    if (payload.ref !== `refs/heads/${payload.repository.default_branch}`) return;
+    if (payload.deleted) {
+      context.log.info('✋ skipped: branch was deleted');
+      return;
+    }
+    if (payload.ref !== `refs/heads/${payload.repository.default_branch}`) {
+      context.log.info(`✋ skipped: push was to '${payload.ref}', not the default branch`);
+      return;
+    }
     // Guard: don't react to our own commits
-    if (payload.head_commit?.message?.includes(BOT_COMMIT_MARKER)) return;
+    if (payload.head_commit?.message?.includes(BOT_COMMIT_MARKER)) {
+      context.log.info('✋ skipped: this is the bot\'s own commit');
+      return;
+    }
 
     const before = payload.before;
     const after  = payload.after;
     // Guard: skip brand-new branches (no base to compare against)
-    if (!before || before === '0000000000000000000000000000000000000000') return;
+    if (!before || before === '0000000000000000000000000000000000000000') {
+      context.log.info('✋ skipped: no base commit to compare against (new branch)');
+      return;
+    }
 
     // Guard: only auto-commit for the owner / admin
     if (STRICT_OWNER_ONLY) {
       const pusher  = payload.sender?.login;
       const trusted = await isOwnerOrAdmin(context.octokit, owner, repo, pusher);
       if (!trusted) {
-        app.log.info(`Push by '${pusher}' is not owner/admin — requires PR approval flow`);
+        context.log.info(`✋ skipped: push by '${pusher}' is not owner/admin — requires PR approval flow`);
         return;
       }
     }
 
     try {
       const files = await getCompareFiles(context.octokit, owner, repo, before, after);
+      context.log.info(`📄 ${files.length} changed file(s) in this push`);
       await processEvent({ context, owner, repo, files, branch: payload.repository.default_branch });
     } catch (err) {
-      app.log.error(err, 'push handler failed');
+      context.log.error(`❌ push handler failed: ${err.message}`);
+      context.log.error(err.stack);
     }
   });
 
   // ── 2. Pull-request review approved ───────────────────────────────────────
   app.on('pull_request_review', async (context) => {
-    if (context.payload.review.state !== 'approved') return;
+    context.log.info('▶ pull_request_review event received');
+
+    if (context.payload.review.state !== 'approved') {
+      context.log.info(`✋ skipped: review state was '${context.payload.review.state}', not 'approved'`);
+      return;
+    }
 
     const pr             = context.payload.pull_request;
     const { owner, repo } = context.repo();
@@ -75,6 +96,7 @@ module.exports = (app) => {
 
     try {
       const files = await getPRFiles(context.octokit, owner, repo, pr.number);
+      context.log.info(`📄 ${files.length} changed file(s) in PR #${pr.number}${isFork ? ' (fork)' : ''}`);
       await processEvent({
         context, owner, repo, files,
         branch:  pr.head.ref,
@@ -82,7 +104,8 @@ module.exports = (app) => {
         isFork,
       });
     } catch (err) {
-      app.log.error(err, 'pull_request_review handler failed');
+      context.log.error(`❌ pull_request_review handler failed: ${err.message}`);
+      context.log.error(err.stack);
     }
   });
 };
@@ -98,13 +121,15 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
   const { toApply, toSuggest } = classifyChanges(filteredFiles);
 
   if (toApply.length === 0 && toSuggest.length === 0) {
-    context.log.info('No documentation-worthy changes detected — nothing to do');
+    context.log.info('ℹ️ No documentation-worthy changes detected — nothing to do');
     return;
   }
 
   context.log.info(
-    `Detected ${toApply.length} auto-apply + ${toSuggest.length} suggest-only change(s)`
+    `✅ Detected ${toApply.length} auto-apply + ${toSuggest.length} suggest-only change(s)`
   );
+  toApply.forEach(c => context.log.info(`   → APPLY: ${c.reason}`));
+  toSuggest.forEach(c => context.log.info(`   → SUGGEST: ${c.reason}`));
 
   // Fetch the current README (ok if it doesn't exist yet)
   let currentReadme = '';
@@ -115,9 +140,13 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
     });
     currentReadme = Buffer.from(data.content, 'base64').toString('utf-8');
     readmeSha     = data.sha;
+    context.log.info(`📖 Fetched current ${README_PATH} (${currentReadme.length} chars)`);
   } catch (err) {
-    if (err.status !== 404) throw err;
-    // No README yet — we'll create one
+    if (err.status !== 404) {
+      context.log.error(`❌ Failed to fetch ${README_PATH}: ${err.message}`);
+      throw err;
+    }
+    context.log.info(`ℹ️ No existing ${README_PATH} — will create one`);
   }
 
   // Apply high-confidence changes
@@ -125,29 +154,46 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
   let report        = [];
 
   if (toApply.length > 0) {
-    const result  = applyChanges(currentReadme, toApply);
-    updatedReadme = result.content;
-    report        = result.report;
+    try {
+      const result  = applyChanges(currentReadme, toApply);
+      updatedReadme = result.content;
+      report        = result.report;
+      context.log.info(`✏️  applyChanges() produced ${report.length} edit(s): ${report.join('; ') || '(none)'}`);
+    } catch (err) {
+      context.log.error(`❌ applyChanges() threw: ${err.message}`);
+      context.log.error(err.stack);
+      throw err;
+    }
   }
 
   const readmeChanged = updatedReadme !== currentReadme;
+  context.log.info(`readmeChanged=${readmeChanged} isFork=${isFork}`);
 
   // Commit if content actually changed and we can push to this branch
   if (readmeChanged && !isFork) {
-    await octokit.repos.createOrUpdateFileContents({
-      owner, repo,
-      path:    README_PATH,
-      message: buildCommitMessage(report),
-      content: Buffer.from(updatedReadme, 'utf-8').toString('base64'),
-      sha:     readmeSha,      // undefined = create new file
-      branch,
-    });
-    context.log.info('README.md committed successfully');
+    try {
+      await octokit.repos.createOrUpdateFileContents({
+        owner, repo,
+        path:    README_PATH,
+        message: buildCommitMessage(report),
+        content: Buffer.from(updatedReadme, 'utf-8').toString('base64'),
+        sha:     readmeSha,      // undefined = create new file
+        branch,
+      });
+      context.log.info(`✅ ${README_PATH} committed successfully to '${branch}'`);
+    } catch (err) {
+      context.log.error(`❌ Failed to commit ${README_PATH}: ${err.message}`);
+      context.log.error(err.stack);
+      throw err;
+    }
+  } else if (readmeChanged && isFork) {
+    context.log.info(`ℹ️ README would change but PR is from a fork — cannot push, will comment instead`);
   }
 
   // Post a detailed PR comment when there is a PR
   if (prNumber) {
     await postComment(octokit, owner, repo, prNumber, report, toSuggest, isFork, readmeChanged);
+    context.log.info(`💬 Comment posted on PR #${prNumber}`);
   }
 }
 
