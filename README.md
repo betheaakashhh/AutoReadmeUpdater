@@ -171,3 +171,5 @@ src/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/textdata` | — |
+| GET | `/` | — |
+| GET | `/x` | — |
