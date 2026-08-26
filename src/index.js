@@ -1,35 +1,26 @@
-/**
- * README Sync Bot — main Probot application.
- *
- * Two event handlers:
- *
- *  push  →  Only fires for the default branch.
- *           If pusher is the repo owner / admin → auto-commit README changes.
- *           Otherwise → skip (they must go through a PR).
- *
- *  pull_request_review  →  Only fires when state === 'approved'.
- *                           Analyses the entire PR diff and applies README
- *                           changes to the PR branch.
- *                           For forked PRs (where we can't push) the suggested
- *                           changes are posted as a PR comment instead.
- *
- * Pipeline per event:
- *   changed files → classifyChanges() → applyChanges() → commit / comment
- */
-
 require('dotenv').config();
 
 const { isOwnerOrAdmin } = require('./permissions');
 const { classifyChanges } = require('./classifier');
 const { applyChanges }    = require('./readme/updater');
+const { LANDING_PAGE_HTML } = require('./landing');
 
 const BOT_COMMIT_MARKER = '[readme-sync-bot]';
 const README_PATH        = process.env.README_PATH   || 'README.md';
 const STRICT_OWNER_ONLY  = process.env.STRICT_OWNER_ONLY !== 'false';
 
-/** @param {import('probot').Probot} app */
-module.exports = (app) => {
+/**
+ * @param {import('probot').Probot} app
+ * @param {{ getRouter: Function }} extras
+ */
+module.exports = (app, { getRouter }) => {
   app.log.info('README Sync Bot ready (code-analysis mode — no AI API)');
+
+  // ── Custom landing page (replaces Probot's default /probot redirect) ─────
+  const router = getRouter('/');
+  router.get('/', (req, res) => {
+    res.type('html').send(LANDING_PAGE_HTML);
+  });
 
   // ── 1. Direct push to the default branch ──────────────────────────────────
   app.on('push', async (context) => {
