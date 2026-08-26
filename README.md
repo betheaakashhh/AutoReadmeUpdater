@@ -173,3 +173,5 @@ src/
 | GET | `/api/textdata` | — |
 | GET | `/` | — |
 | GET | `/x` | — |
+| GET | `/` | — |
+| GET | `/healthz` | — |
