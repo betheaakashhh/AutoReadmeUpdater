@@ -165,3 +165,9 @@ src/
 
 **Adjust confidence thresholds**:
 - Edit `src/classifier.js` → `CONFIDENCE` object
+
+## API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/textdata` | — |
