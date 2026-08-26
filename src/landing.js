@@ -263,8 +263,9 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
 
 <nav>
   <div class="wrap">
-    <div class="brand"><span class="dot">＋</span> README SYNC BOT</div>
+    <div class="brand"><span class="dot">＋</span> AutoReadmeUpdater</div>
     <a class="source" href="https://github.com/betheaakashhh/AutoReadmeUpdater" target="_blank" rel="noopener">view source ↗</a>
+    <a class="source" href="https://github.com/betheaakashhh" target="_blank" rel="noopener">@betheaakashhh ↗</a>
   </div>
 </nav>
 
@@ -332,7 +333,7 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
   <p class="section-eyebrow">get started</p>
   <h2>Install it on a repo. It stays quiet until a diff actually matters.</h2>
   <div class="cta-row">
-    <a class="btn btn-primary" href="https://github.com/apps" target="_blank" rel="noopener">Install the App →</a>
+    <a class="btn btn-primary" href="https://github.com/apps/AutoReadmeUpdater/installations/new" target="_blank" rel="noopener">Install the App →</a>
     <a class="btn btn-secondary" href="https://github.com/betheaakashhh/AutoReadmeUpdater" target="_blank" rel="noopener">Read the source</a>
   </div>
 </section>
