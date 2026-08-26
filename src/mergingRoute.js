@@ -1,6 +1,6 @@
 const router = require('express').Router();
 
-router.get('/api/ping', (req, res) => {
+router.get('/api/merging', (req, res) => {
   res.json({ ok: true });
 });
 
