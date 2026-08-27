@@ -1,5 +1,11 @@
 # README Auto Updater
 
+[![Docs: Auto-updated](https://img.shields.io/badge/docs-auto--updated-4AC26B?style=flat-square)](https://github.com/betheaakashhh/AutoReadmeUpdater)
+[![Built with Probot](https://img.shields.io/badge/built%20with-probot-E3B341?style=flat-square)](https://probot.github.io/)
+[![No AI](https://img.shields.io/badge/no-AI%20API-0B0E14?style=flat-square)](https://github.com/betheaakashhh/AutoReadmeUpdater)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-333?style=flat-square)](package.json)
+
+
 A GitHub App that watches your repo and surgically updates `README.md` when meaningful code changes happen — **no AI API, no monthly cost, no guessing.**
 
 It uses diff parsing and code analysis to detect real changes, then updates only the affected section of your README.
