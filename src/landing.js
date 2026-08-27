@@ -78,13 +78,28 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
 
   /* ── Hero ────────────────────────────────────────────────────────── */
   .hero { padding: 72px 0 56px; }
+  .hero-top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 18px;
+  }
+  .hero-top .logo {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel);
+    object-fit: cover;
+    flex-shrink: 0;
+  }
   .eyebrow {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--muted);
-    margin: 0 0 18px;
+    margin: 0;
   }
   h1 {
     font-family: 'IBM Plex Mono', monospace;
@@ -235,6 +250,53 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
   }
   .dial-legend span.sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; }
 
+  /* ── Permissions table ("Who Gets What") ────────────────────────── */
+  .perm-wrap {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .perm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+  }
+  .perm-table th, .perm-table td {
+    text-align: left;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .perm-table th {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .perm-table td { color: var(--muted); }
+  .perm-table td:first-child { color: var(--text); font-weight: 500; }
+  .perm-table tr:last-child td { border-bottom: none; }
+  @media (max-width: 700px) {
+    .perm-table { font-size: 12px; }
+    .perm-table th, .perm-table td { padding: 12px; }
+  }
+  .perm-note {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    margin: 14px 2px 0;
+  }
+  .perm-note code {
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
   /* ── CTA ─────────────────────────────────────────────────────────── */
   .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
   .btn {
@@ -270,7 +332,11 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
 </nav>
 
 <div class="hero wrap">
-  <p class="eyebrow">no ai · no api key · no monthly cost</p>
+  <div class="hero-top">
+    <!-- TODO: swap this src for your own logo path once you have one, e.g. /logo.png -->
+    <img class="logo" src="assets/logo.png" alt="AutoReadmeUpdater logo" />
+    <p class="eyebrow">no ai · no api key · no monthly cost</p>
+  </div>
   <h1>It reads your diff.<br>It edits your README.<br>Nothing else.</h1>
   <p class="lede">A GitHub App that watches every push and pull request, and surgically
   updates only the parts of README.md that a code change actually invalidates —
@@ -327,6 +393,40 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
       <div><span class="sw" style="background:var(--add);"></span>committed automatically</div>
     </div>
   </div>
+</section>
+
+<section class="wrap">
+  <p class="section-eyebrow">who gets what</p>
+  <h2>Same detection, different actions — your role decides what happens next.</h2>
+  <div class="perm-wrap">
+    <table class="perm-table">
+      <thead>
+        <tr>
+          <th>Actor</th>
+          <th>On push</th>
+          <th>On PR approval</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Repo owner / admin</td>
+          <td>README committed immediately</td>
+          <td>README committed to the PR branch</td>
+        </tr>
+        <tr>
+          <td>Contributor (non-admin)</td>
+          <td>Ignored — must open a PR</td>
+          <td>README committed after approval</td>
+        </tr>
+        <tr>
+          <td>Fork contributor</td>
+          <td>—</td>
+          <td>Suggested as a PR comment (can't push to a fork)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="perm-note">Controlled by <code>STRICT_OWNER_ONLY</code> (default <code>true</code>) — turn it off to let approved PRs from any contributor auto-commit.</p>
 </section>
 
 <section class="wrap">
