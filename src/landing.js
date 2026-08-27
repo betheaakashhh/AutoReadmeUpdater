@@ -334,7 +334,7 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
 <div class="hero wrap">
   <div class="hero-top">
     <!-- TODO: swap this src for your own logo path once you have one, e.g. /logo.png -->
-    <img class="logo" src="assets/logo.png" alt="AutoReadmeUpdater logo" />
+    <img class="logo" src="/assets/logo.png" alt="AutoReadmeUpdater logo" />
     <p class="eyebrow">no ai · no api key · no monthly cost</p>
   </div>
   <h1>It reads your diff.<br>It edits your README.<br>Nothing else.</h1>
