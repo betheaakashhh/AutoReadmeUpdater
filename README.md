@@ -246,3 +246,12 @@ No license file is currently set for this repository. Until one is added, all ri
 ## Author
 
 **[betheaakashhh](https://github.com/betheaakashhh)**
+
+<!-- readme-sync-bot:checklist:start -->
+## 📋 Recommended Sections Checklist
+
+_The bot can't write these automatically — they need your judgment, not a diff. This list updates itself as you add them:_
+
+- [ ] Acknowledgements
+- [ ] Testing
+<!-- readme-sync-bot:checklist:end -->
