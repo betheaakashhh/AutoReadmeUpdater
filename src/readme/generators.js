@@ -128,4 +128,84 @@ function inferEnvDesc(varName) {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
-module.exports = { apiHeadingEntry, apiTableRow, apiSection, envTableRow, configSection };
+// ── Checklist block (for sections the bot can't auto-write) ──────────────────
+
+/**
+ * Generate the "recommended sections you still need to add yourself" block.
+ * Wrapped in HTML comment markers so future runs can find and replace this
+ * exact block instead of duplicating it.
+ */
+function checklistBlock(missing) {
+  let md = `\n<!-- readme-sync-bot:checklist:start -->\n`;
+  md += `## 📋 Recommended Sections Checklist\n\n`;
+  md += `_The bot can't write these automatically — they need your judgment, not a diff. `;
+  md += `This list updates itself as you add them:_\n\n`;
+  missing.forEach(m => { md += `- [ ] ${m.label}\n`; });
+  md += `<!-- readme-sync-bot:checklist:end -->\n`;
+  return md;
+}
+
+// ── Tech Stack generators ──────────────────────────────────────────────────
+
+function techStackTableRow(change) {
+  const type = change.dev ? 'dev dependency' : 'dependency';
+  return `| \`${change.name}\` | ${change.version} | ${type} |`;
+}
+
+function techStackSection(changes) {
+  let md = `\n## Tech Stack\n\n`;
+  md += `| Package | Version | Type |\n`;
+  md += `|---------|---------|------|\n`;
+  changes.forEach(c => { md += `${techStackTableRow(c)}\n`; });
+  return md;
+}
+
+// ── Usage generators ────────────────────────────────────────────────────────
+
+function usageEntry(change) {
+  return `- \`npm run ${change.name}\` — \`${change.command}\``;
+}
+
+function usageSection(changes) {
+  let md = `\n## Usage\n\n`;
+  changes.forEach(c => { md += `${usageEntry(c)}\n`; });
+  return md;
+}
+
+// ── Folder Structure generators ─────────────────────────────────────────────
+
+function folderEntry(change) {
+  return `- \`${change.path}\``;
+}
+
+function folderSection(changes) {
+  let md = `\n## Folder Structure\n\n`;
+  changes.forEach(c => { md += `${folderEntry(c)}\n`; });
+  return md;
+}
+
+// ── Checklist block (for sections the bot can't auto-write) ──────────────────
+
+/**
+ * Generate the "recommended sections you still need to add yourself" block.
+ * Wrapped in HTML comment markers so future runs can find and replace this
+ * exact block instead of duplicating it.
+ */
+function checklistBlock(missing) {
+  let md = `\n<!-- readme-sync-bot:checklist:start -->\n`;
+  md += `## 📋 Recommended Sections Checklist\n\n`;
+  md += `_The bot can't write these automatically — they need your judgment, not a diff. `;
+  md += `This list updates itself as you add them:_\n\n`;
+  missing.forEach(m => { md += `- [ ] ${m.label}\n`; });
+  md += `<!-- readme-sync-bot:checklist:end -->\n`;
+  return md;
+}
+
+module.exports = {
+  apiHeadingEntry, apiTableRow, apiSection,
+  envTableRow, configSection,
+  techStackTableRow, techStackSection,
+  usageEntry, usageSection,
+  folderEntry, folderSection,
+  checklistBlock,
+};

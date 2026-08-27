@@ -16,12 +16,18 @@
 const { parseReadme, findSection, getSectionEnd } = require('./parser');
 const {
   apiHeadingEntry, apiTableRow, apiSection,
-  envTableRow, configSection, checklistBlock,
+  envTableRow, configSection,
+  techStackTableRow, techStackSection,
+  usageEntry, usageSection,
+  folderEntry, folderSection,
+  checklistBlock,
 } = require('./generators');
 const { findMissingSections } = require('./sectionAudit');
 
 const CHECKLIST_START = '<!-- readme-sync-bot:checklist:start -->';
 const CHECKLIST_END   = '<!-- readme-sync-bot:checklist:end -->';
+const TOC_START        = '<!-- readme-sync-bot:toc:start -->';
+const TOC_END          = '<!-- readme-sync-bot:toc:end -->';
 
 // Detects heading-style API entries: ### GET /path
 const API_HEADING_RE = /^#{2,4}\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+`?(\S+?)`?$/i;
@@ -59,11 +65,16 @@ function applyChanges(readmeContent, changes) {
 
 function applyOne(content, change) {
   switch (change.type) {
-    case 'NEW_API':        return addApiRoute(content, change);
-    case 'MODIFIED_API':   return modifyApiRoute(content, change);
-    case 'REMOVED_API':    return removeApiRoute(content, change);
-    case 'NEW_CONFIG':     return addEnvVar(content, change);
-    case 'REMOVED_CONFIG': return removeEnvVar(content, change);
+    case 'NEW_API':            return addApiRoute(content, change);
+    case 'MODIFIED_API':       return modifyApiRoute(content, change);
+    case 'REMOVED_API':        return removeApiRoute(content, change);
+    case 'NEW_CONFIG':         return addEnvVar(content, change);
+    case 'REMOVED_CONFIG':     return removeEnvVar(content, change);
+    case 'NEW_DEPENDENCY':     return addDependency(content, change);
+    case 'REMOVED_DEPENDENCY': return removeDependency(content, change);
+    case 'NEW_SCRIPT':         return addScript(content, change);
+    case 'REMOVED_SCRIPT':     return removeScript(content, change);
+    case 'NEW_FOLDER':         return addFolder(content, change);
     default: return { content, changed: false, description: '' };
   }
 }
@@ -261,6 +272,196 @@ function removeEnvVar(content, change) {
   return { content, changed: false, description: '' };
 }
 
+// ─── Tech Stack changes ────────────────────────────────────────────────────────
+
+function addDependency(content, change) {
+  const { sections, lines } = parseReadme(content);
+  const existingTechSection = findSection(sections, 'techstack');
+
+  if (!existingTechSection) {
+    return {
+      content: content.trimEnd() + '\n' + techStackSection([change]),
+      changed: true,
+      description: `Added \`${change.name}\` (created new Tech Stack section)`,
+    };
+  }
+
+  const endLine = getSectionEnd(existingTechSection, sections, lines.length);
+  const sectionLines = lines.slice(existingTechSection.startLine, endLine + 1);
+
+  // Dedupe: skip if this package is already listed anywhere in the section
+  if (sectionLines.some(l => l.includes(`\`${change.name}\``))) {
+    return { content, changed: false, description: '' };
+  }
+
+  const tableHeaderIdx = sectionLines.findIndex(l => /\|\s*package\s*\|/i.test(l));
+  if (tableHeaderIdx !== -1) {
+    let lastDataRow = tableHeaderIdx + 1;
+    for (let i = tableHeaderIdx + 2; i < sectionLines.length; i++) {
+      if (sectionLines[i].startsWith('|')) lastDataRow = i;
+      else break;
+    }
+    const insertAt = existingTechSection.startLine + lastDataRow + 1;
+    lines.splice(insertAt, 0, techStackTableRow(change));
+    return {
+      content: lines.join('\n'),
+      changed: true,
+      description: `Added \`${change.name}\` to Tech Stack table`,
+    };
+  }
+
+  const newTable = [
+    '',
+    '| Package | Version | Type |',
+    '|---------|---------|------|',
+    techStackTableRow(change),
+  ];
+  lines.splice(endLine + 1, 0, ...newTable);
+  return {
+    content: lines.join('\n'),
+    changed: true,
+    description: `Added \`${change.name}\` to Tech Stack section`,
+  };
+}
+
+function removeDependency(content, change) {
+  const { lines } = parseReadme(content);
+  const idx = lines.findIndex(l => l.startsWith('|') && l.includes(`\`${change.name}\``));
+  if (idx !== -1) {
+    lines.splice(idx, 1);
+    return {
+      content: lines.join('\n'),
+      changed: true,
+      description: `Removed \`${change.name}\` from Tech Stack section`,
+    };
+  }
+  return { content, changed: false, description: '' };
+}
+
+// ─── Usage / script changes ─────────────────────────────────────────────────────
+
+function addScript(content, change) {
+  const { sections, lines } = parseReadme(content);
+  const existingUsageSection = findSection(sections, 'usage');
+
+  if (!existingUsageSection) {
+    return {
+      content: content.trimEnd() + '\n' + usageSection([change]),
+      changed: true,
+      description: `Added \`npm run ${change.name}\` (created new Usage section)`,
+    };
+  }
+
+  const endLine = getSectionEnd(existingUsageSection, sections, lines.length);
+  const sectionLines = lines.slice(existingUsageSection.startLine, endLine + 1);
+
+  if (sectionLines.some(l => l.includes(`npm run ${change.name}`))) {
+    return { content, changed: false, description: '' };
+  }
+
+  lines.splice(endLine + 1, 0, usageEntry(change));
+  return {
+    content: lines.join('\n'),
+    changed: true,
+    description: `Added \`npm run ${change.name}\` to Usage section`,
+  };
+}
+
+function removeScript(content, change) {
+  const { lines } = parseReadme(content);
+  const idx = lines.findIndex(l => l.includes(`npm run ${change.name}`));
+  if (idx !== -1) {
+    lines.splice(idx, 1);
+    return {
+      content: lines.join('\n'),
+      changed: true,
+      description: `Removed \`npm run ${change.name}\` from Usage section`,
+    };
+  }
+  return { content, changed: false, description: '' };
+}
+
+// ─── Folder Structure changes ───────────────────────────────────────────────────
+
+function addFolder(content, change) {
+  const { sections, lines } = parseReadme(content);
+  const existingFolderSection = findSection(sections, 'folders');
+
+  if (!existingFolderSection) {
+    return {
+      content: content.trimEnd() + '\n' + folderSection([change]),
+      changed: true,
+      description: `Added \`${change.path}\` (created new Folder Structure section)`,
+    };
+  }
+
+  const endLine = getSectionEnd(existingFolderSection, sections, lines.length);
+  const sectionLines = lines.slice(existingFolderSection.startLine, endLine + 1);
+
+  if (sectionLines.some(l => l.includes(change.path))) {
+    return { content, changed: false, description: '' };
+  }
+
+  lines.splice(endLine + 1, 0, folderEntry(change));
+  return {
+    content: lines.join('\n'),
+    changed: true,
+    description: `Added \`${change.path}\` to Folder Structure section`,
+  };
+}
+
+// ─── Table of Contents (recomputed every run, not diff-triggered) ──────────────
+
+function slugify(title) {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-');
+}
+
+/**
+ * Rebuild the Table of Contents from the README's current level-2 headings.
+ * Runs on every pass, independent of any specific diff — it reflects
+ * whatever the document looks like right now, including sections other
+ * analyzers just added or removed in this same run.
+ *
+ * @param {string} content
+ * @returns {string} updated content
+ */
+function syncTOC(content) {
+  const startIdx = content.indexOf(TOC_START);
+  const endIdx   = content.indexOf(TOC_END);
+
+  let stripped = content;
+  if (startIdx !== -1 && endIdx !== -1) {
+    const before = content.slice(0, startIdx).replace(/\n+$/, '\n');
+    const after  = content.slice(endIdx + TOC_END.length).replace(/^\n+/, '\n');
+    stripped = (before + after).replace(/\n{3,}/g, '\n\n');
+  }
+
+  const { sections, lines } = parseReadme(stripped);
+  const level2 = sections.filter(s =>
+    s.level === 2 && s.title.toLowerCase() !== 'table of contents'
+  );
+
+  if (level2.length === 0) {
+    return stripped; // nothing to link to
+  }
+
+  const entries = level2.map(s => `- [${s.title}](#${slugify(s.title)})`).join('\n');
+  const block = `${TOC_START}\n## Table of Contents\n\n${entries}\n${TOC_END}`;
+
+  const h1 = sections.find(s => s.level === 1);
+  if (!h1) {
+    return stripped.trimEnd() + '\n\n' + block + '\n';
+  }
+
+  const insertAt = h1.startLine + 1;
+  const newLines = [...lines.slice(0, insertAt), '', block, '', ...lines.slice(insertAt)];
+  return newLines.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
 // ─── Recommended-sections checklist ───────────────────────────────────────────
 
 /**
@@ -297,4 +498,4 @@ function syncChecklist(content) {
   };
 }
 
-module.exports = { applyChanges, syncChecklist };
+module.exports = { applyChanges, syncChecklist, syncTOC };

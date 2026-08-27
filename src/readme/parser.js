@@ -14,6 +14,9 @@ const SECTION_KEYWORDS = {
   config:   ['configuration', 'config', 'environment', 'env vars', 'environment variable', 'variables', 'settings'],
   install:  ['installation', 'install', 'getting started', 'quickstart', 'quick start', 'setup'],
   features: ['feature', 'what is this', 'overview', 'about', 'capability'],
+  techstack: ['tech stack', 'stack', 'technologies', 'packages', 'dependencies'],
+  usage:     ['usage', 'running', 'run the project', 'commands', 'scripts'],
+  folders:   ['folder structure', 'project structure', 'directory structure', 'file structure'],
 };
 
 /**

@@ -3,9 +3,12 @@
  * Returns a flat list of structured change objects, sorted by confidence.
  *
  * Change types returned:
- *   NEW_API | MODIFIED_API | REMOVED_API      (from routes.js)
- *   NEW_CONFIG | REMOVED_CONFIG               (from env.js)
- *   NEW_FEATURE                               (from features.js)
+ *   NEW_API | MODIFIED_API | REMOVED_API            (from routes.js)
+ *   NEW_CONFIG | REMOVED_CONFIG                     (from env.js)
+ *   NEW_FEATURE                                     (from features.js)
+ *   NEW_DEPENDENCY | REMOVED_DEPENDENCY              (from dependencies.js)
+ *   NEW_SCRIPT | REMOVED_SCRIPT                      (from dependencies.js)
+ *   NEW_FOLDER                                       (from folders.js)
  *
  * Confidence thresholds:
  *   >= 0.90  → AUTO_APPLY  (commit to README automatically)
@@ -13,9 +16,11 @@
  *   <  0.70  → ignored silently
  */
 
-const { analyzeRouteChanges }   = require('./analyzers/routes');
-const { analyzeEnvChanges }     = require('./analyzers/env');
-const { analyzeFeatureChanges } = require('./analyzers/features');
+const { analyzeRouteChanges }      = require('./analyzers/routes');
+const { analyzeEnvChanges }        = require('./analyzers/env');
+const { analyzeFeatureChanges }    = require('./analyzers/features');
+const { analyzeDependencyChanges } = require('./analyzers/dependencies');
+const { analyzeFolderChanges }     = require('./analyzers/folders');
 
 // Changes in these files should NEVER trigger README updates
 const ALWAYS_IGNORE = [
@@ -60,6 +65,8 @@ function classifyChanges(files) {
     ...analyzeRouteChanges(relevant),
     ...analyzeEnvChanges(relevant),
     ...analyzeFeatureChanges(relevant),
+    ...analyzeDependencyChanges(relevant),
+    ...analyzeFolderChanges(relevant),
   ];
 
   const toApply   = all.filter(c => c.confidence >= CONFIDENCE.AUTO_APPLY);
