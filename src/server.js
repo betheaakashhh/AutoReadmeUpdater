@@ -12,6 +12,7 @@
 
 require('dotenv').config();
 
+const path = require('path');
 const express = require('express');
 const { createNodeMiddleware, createProbot } = require('probot');
 
@@ -36,6 +37,10 @@ const server = express();
 // Webhook handling — only intercepts POST /api/github/webhooks, passes
 // everything else through to the routes below.
 server.use(webhookMiddleware);
+
+// ── Static assets (logo, etc.) — assets/ lives one level up from src/,
+
+server.use('/assets', express.static(path.join(__dirname, '../assets')));
 
 // ── Landing page — the actual root URL now ─────────────────────────────────
 server.get('/', (req, res) => {
