@@ -16,8 +16,12 @@
 const { parseReadme, findSection, getSectionEnd } = require('./parser');
 const {
   apiHeadingEntry, apiTableRow, apiSection,
-  envTableRow, configSection,
+  envTableRow, configSection, checklistBlock,
 } = require('./generators');
+const { findMissingSections } = require('./sectionAudit');
+
+const CHECKLIST_START = '<!-- readme-sync-bot:checklist:start -->';
+const CHECKLIST_END   = '<!-- readme-sync-bot:checklist:end -->';
 
 // Detects heading-style API entries: ### GET /path
 const API_HEADING_RE = /^#{2,4}\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+`?(\S+?)`?$/i;
@@ -257,4 +261,40 @@ function removeEnvVar(content, change) {
   return { content, changed: false, description: '' };
 }
 
-module.exports = { applyChanges };
+// ─── Recommended-sections checklist ───────────────────────────────────────────
+
+/**
+ * Recompute which human-judgment sections (License, Author, etc.) are
+ * missing, and update the checklist block in the README to match — removing
+ * items the user has since added, adding items that newly became missing,
+ * and removing the whole block once nothing is missing anymore.
+ *
+ * @param {string} content
+ * @returns {{ content: string, missing: {id: string, label: string}[] }}
+ */
+function syncChecklist(content) {
+  // Strip any existing checklist block first, so we always rebuild from a
+  // clean base rather than accumulating stale copies.
+  const startIdx = content.indexOf(CHECKLIST_START);
+  const endIdx   = content.indexOf(CHECKLIST_END);
+
+  let stripped = content;
+  if (startIdx !== -1 && endIdx !== -1) {
+    const before = content.slice(0, startIdx).replace(/\n+$/, '\n');
+    const after  = content.slice(endIdx + CHECKLIST_END.length).replace(/^\n+/, '\n');
+    stripped = (before + after).replace(/\n{3,}/g, '\n\n');
+  }
+
+  const missing = findMissingSections(stripped);
+
+  if (missing.length === 0) {
+    return { content: stripped, missing };
+  }
+
+  return {
+    content: stripped.trimEnd() + '\n' + checklistBlock(missing),
+    missing,
+  };
+}
+
+module.exports = { applyChanges, syncChecklist };

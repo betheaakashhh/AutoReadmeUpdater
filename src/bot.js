@@ -25,7 +25,7 @@
 
 const { isOwnerOrAdmin } = require('./permissions');
 const { classifyChanges } = require('./classifier');
-const { applyChanges }    = require('./readme/updater');
+const { applyChanges, syncChecklist } = require('./readme/updater');
 
 const BOT_COMMIT_MARKER = '[readme-sync-bot]';
 const README_PATH        = process.env.README_PATH   || 'README.md';
@@ -124,11 +124,6 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
 
   const { toApply, toSuggest } = classifyChanges(filteredFiles);
 
-  if (toApply.length === 0 && toSuggest.length === 0) {
-    context.log.info('ℹ️ No documentation-worthy changes detected — nothing to do');
-    return;
-  }
-
   context.log.info(
     `✅ Detected ${toApply.length} auto-apply + ${toSuggest.length} suggest-only change(s)`
   );
@@ -153,7 +148,7 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
     context.log.info(`ℹ️ No existing ${README_PATH} — will create one`);
   }
 
-  // Apply high-confidence changes
+  // Apply high-confidence diff-based changes
   let updatedReadme = currentReadme;
   let report        = [];
 
@@ -170,6 +165,20 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
     }
   }
 
+  // Sync the "needs your judgment, not a diff" checklist (License, Author, etc.)
+  // — runs every time regardless of toApply/toSuggest, since it reflects the
+  // README's current state, not this specific diff.
+  const beforeChecklist = updatedReadme;
+  const { content: readmeWithChecklist, missing } = syncChecklist(updatedReadme);
+  updatedReadme = readmeWithChecklist;
+  const checklistChanged = updatedReadme !== beforeChecklist;
+
+  if (missing.length > 0) {
+    context.log.info(`📋 Missing sections (needs your judgment): ${missing.map(m => m.label).join(', ')}`);
+  } else {
+    context.log.info('📋 All recommended human-judgment sections are present');
+  }
+
   const readmeChanged = updatedReadme !== currentReadme;
   context.log.info(`readmeChanged=${readmeChanged} isFork=${isFork}`);
 
@@ -179,7 +188,7 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
       await octokit.repos.createOrUpdateFileContents({
         owner, repo,
         path:    README_PATH,
-        message: buildCommitMessage(report),
+        message: buildCommitMessage(report, checklistChanged),
         content: Buffer.from(updatedReadme, 'utf-8').toString('base64'),
         sha:     readmeSha,      // undefined = create new file
         branch,
@@ -192,11 +201,13 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
     }
   } else if (readmeChanged && isFork) {
     context.log.info(`ℹ️ README would change but PR is from a fork — cannot push, will comment instead`);
+  } else {
+    context.log.info('ℹ️ No README changes needed this run');
   }
 
   // Post a detailed PR comment when there is a PR
   if (prNumber) {
-    await postComment(octokit, owner, repo, prNumber, report, toSuggest, isFork, readmeChanged);
+    await postComment(octokit, owner, repo, prNumber, report, toSuggest, isFork, readmeChanged, missing);
     context.log.info(`💬 Comment posted on PR #${prNumber}`);
   }
 }
@@ -218,16 +229,22 @@ async function getPRFiles(octokit, owner, repo, pull_number) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildCommitMessage(report) {
+function buildCommitMessage(report, checklistChanged) {
+  if (report.length === 0 && checklistChanged) {
+    return `docs: update recommended-sections checklist ${BOT_COMMIT_MARKER}`;
+  }
+
   const summary = report.length === 1
     ? report[0]
     : `${report.length} documentation updates`;
 
   const body = report.map(r => `- ${r}`).join('\n');
-  return `docs: ${summary} ${BOT_COMMIT_MARKER}\n\n${body}`;
+  let msg = `docs: ${summary} ${BOT_COMMIT_MARKER}`;
+  if (body) msg += `\n\n${body}`;
+  return msg;
 }
 
-async function postComment(octokit, owner, repo, issue_number, applied, suggested, isFork, wasCommitted) {
+async function postComment(octokit, owner, repo, issue_number, applied, suggested, isFork, wasCommitted, missing) {
   const lines = ['### 🤖 README Sync Bot\n'];
 
   if (wasCommitted && !isFork && applied.length > 0) {
@@ -246,6 +263,11 @@ async function postComment(octokit, owner, repo, issue_number, applied, suggeste
     suggested.forEach(c =>
       lines.push(`- ⚠️ ${c.reason} *(${Math.round(c.confidence * 100)}% confidence)*`)
     );
+  }
+
+  if (missing && missing.length > 0) {
+    lines.push('\n**📋 Recommended sections still missing (these need your judgment, not the bot\'s):**\n');
+    missing.forEach(m => lines.push(`- [ ] ${m.label}`));
   }
 
   // Nothing worth posting
