@@ -1,9 +1,4 @@
-/**
- * Standalone landing page served at the root URL, replacing Probot's default
- * redirect-to-/probot page. Pure server-rendered HTML — no build step.
- */
-
-const LANDING_PAGE_HTML = `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -746,7 +741,7 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
   }
 
   var NL = String.fromCharCode(10);
-  var ROUTE_RE = /\\.(get|post|put|delete|patch)\\(\\s*['"]([^'"]+)['"]/i;
+  var ROUTE_RE = /\\.(get|post|put|delete|patch)\\(\\s*['"]([^'"]+)['"]\\)/i;
 
   var DEFAULT_CODE = [
     "const router = require('express').Router();",
@@ -1209,6 +1204,4 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
 </script>
 
 </body>
-</html>`;
-
-module.exports = { LANDING_PAGE_HTML };
+</html>
