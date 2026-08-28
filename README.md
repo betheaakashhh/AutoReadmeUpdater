@@ -194,6 +194,7 @@ Runs `node ./src/server.js` — a plain Express server (not the `probot run` CLI
 | `GET` | `/` | Landing page |
 | `GET` | `/healthz` | Liveness check (`{ status: "ok" }`) — useful for uptime pingers |
 | `POST` | `/api/github/webhooks` | GitHub webhook receiver (must match the App's configured Webhook URL) |
+| GET | `/api/orders/:id/status` | — |
 
 ## Deployment
 
