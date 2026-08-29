@@ -1,31 +1,8 @@
-/**
- * README Sync Bot — Probot application function.
- *
- * Two event handlers:
- *
- *  push  →  Only fires for the default branch.
- *           If pusher is the repo owner / admin → auto-commit README changes.
- *           Otherwise → skip (they must go through a PR).
- *
- *  pull_request_review  →  Only fires when state === 'approved'.
- *                           Analyses the entire PR diff and applies README
- *                           changes to the PR branch.
- *                           For forked PRs (where we can't push) the suggested
- *                           changes are posted as a PR comment instead.
- *
- * Pipeline per event:
- *   changed files → classifyChanges() → applyChanges() → commit / comment
- *
- * NOTE: this file only defines webhook behaviour. HTTP routing (including
- * the landing page) lives in server.js, since we run our own Express server
- * instead of the `probot run` CLI — that's the only way to get full control
- * over the root "/" route (Probot's built-in "/" → "/probot" redirect always
- * wins over a custom route mounted through `probot run`'s getRouter).
- */
+
 
 const { isOwnerOrAdmin } = require('./permissions');
 const { classifyChanges } = require('./classifier');
-const { applyChanges, syncChecklist } = require('./readme/updater');
+const { applyChanges, syncChecklist, syncTOC, syncFolderStructure } = require('./readme/updater');
 
 const BOT_COMMIT_MARKER = '[readme-sync-bot]';
 const README_PATH        = process.env.README_PATH   || 'README.md';
@@ -44,7 +21,7 @@ module.exports = (app) => {
 
     // Guard: only act on the default branch
     if (payload.deleted) {
-      context.log.info('✋ skipped: branch was deleted');
+      context.log.info('✋skipped: branch was deleted');
       return;
     }
     if (payload.ref !== `refs/heads/${payload.repository.default_branch}`) {
@@ -124,6 +101,11 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
 
   const { toApply, toSuggest } = classifyChanges(filteredFiles);
 
+  // Folder changes accumulate into a whole-tree rebuild rather than a
+  // one-line insert, so they're pulled out and synced separately.
+  const folderChanges = toApply.filter(c => c.type === 'NEW_FOLDER');
+  const otherApply     = toApply.filter(c => c.type !== 'NEW_FOLDER');
+
   context.log.info(
     `✅ Detected ${toApply.length} auto-apply + ${toSuggest.length} suggest-only change(s)`
   );
@@ -148,13 +130,13 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
     context.log.info(`ℹ️ No existing ${README_PATH} — will create one`);
   }
 
-  // Apply high-confidence diff-based changes
+  // Apply high-confidence diff-based changes (everything except folders)
   let updatedReadme = currentReadme;
   let report        = [];
 
-  if (toApply.length > 0) {
+  if (otherApply.length > 0) {
     try {
-      const result  = applyChanges(currentReadme, toApply);
+      const result  = applyChanges(currentReadme, otherApply);
       updatedReadme = result.content;
       report        = result.report;
       context.log.info(`✏️  applyChanges() produced ${report.length} edit(s): ${report.join('; ') || '(none)'}`);
@@ -165,13 +147,26 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
     }
   }
 
+  // Fold in any new folders — rebuilds the whole tree from the accumulated
+  // set of paths the bot has ever seen, not just today's diff.
+  if (folderChanges.length > 0) {
+    const { content: withFolders, added } = syncFolderStructure(
+      updatedReadme,
+      folderChanges.map(c => c.path)
+    );
+    updatedReadme = withFolders;
+    added.forEach(p => report.push(`Added \`${p}\` to Folder Structure tree`));
+    context.log.info(`🌳 Folder Structure: ${added.length ? `added ${added.join(', ')}` : 'no new paths'}`);
+  }
+
   // Sync the "needs your judgment, not a diff" checklist (License, Author, etc.)
-  // — runs every time regardless of toApply/toSuggest, since it reflects the
-  // README's current state, not this specific diff.
-  const beforeChecklist = updatedReadme;
-  const { content: readmeWithChecklist, missing } = syncChecklist(updatedReadme);
-  updatedReadme = readmeWithChecklist;
-  const checklistChanged = updatedReadme !== beforeChecklist;
+  // and rebuild the Table of Contents — both run every time regardless of
+  // toApply/toSuggest, since they reflect the README's current state overall,
+  // not this specific diff.
+  const afterApply = updatedReadme;
+  const { content: readmeWithChecklist, missing } = syncChecklist(afterApply);
+  updatedReadme = syncTOC(readmeWithChecklist);
+  const metaChanged = updatedReadme !== afterApply;
 
   if (missing.length > 0) {
     context.log.info(`📋 Missing sections (needs your judgment): ${missing.map(m => m.label).join(', ')}`);
@@ -188,7 +183,7 @@ async function processEvent({ context, owner, repo, files, branch, prNumber = nu
       await octokit.repos.createOrUpdateFileContents({
         owner, repo,
         path:    README_PATH,
-        message: buildCommitMessage(report, checklistChanged),
+        message: buildCommitMessage(report, metaChanged),
         content: Buffer.from(updatedReadme, 'utf-8').toString('base64'),
         sha:     readmeSha,      // undefined = create new file
         branch,
@@ -229,9 +224,9 @@ async function getPRFiles(octokit, owner, repo, pull_number) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildCommitMessage(report, checklistChanged) {
-  if (report.length === 0 && checklistChanged) {
-    return `docs: update recommended-sections checklist ${BOT_COMMIT_MARKER}`;
+function buildCommitMessage(report, metaChanged) {
+  if (report.length === 0 && metaChanged) {
+    return `docs: sync checklist & table of contents ${BOT_COMMIT_MARKER}`;
   }
 
   const summary = report.length === 1

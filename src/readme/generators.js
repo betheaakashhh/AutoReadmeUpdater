@@ -1,14 +1,4 @@
-/**
- * Pure template functions that generate Markdown snippets for each change type.
- * No AI — deterministic output based on the structured change object.
- */
 
-// ── API route generators ──────────────────────────────────────────────────────
-
-/**
- * Generate a heading-style API entry (### METHOD /path).
- * Used when the existing API section uses heading-per-endpoint format.
- */
 function apiHeadingEntry(change) {
   const params = [...change.path.matchAll(/:([a-zA-Z_]\w*)/g)].map(m => m[1]);
   let md = `\n### ${change.method} \`${change.path}\`\n`;
@@ -174,14 +164,40 @@ function usageSection(changes) {
 
 // ── Folder Structure generators ─────────────────────────────────────────────
 
-function folderEntry(change) {
-  return `- \`${change.path}\``;
+/**
+ * Build a nested object from a flat list of folder paths, e.g.
+ * ['src/', 'src/features/', 'assets/'] → { src: { features: {} }, assets: {} }
+ */
+function buildFolderTree(paths) {
+  const root = {};
+  paths.forEach(p => {
+    const parts = p.split('/').filter(Boolean);
+    let node = root;
+    parts.forEach(part => {
+      node[part] = node[part] || {};
+      node = node[part];
+    });
+  });
+  return root;
 }
 
-function folderSection(changes) {
-  let md = `\n## Folder Structure\n\n`;
-  changes.forEach(c => { md += `${folderEntry(c)}\n`; });
-  return md;
+/** Render a nested folder tree as ASCII, in the usual README style. */
+function renderFolderTree(node, prefix = '') {
+  const keys = Object.keys(node).sort();
+  let out = '';
+  keys.forEach((key, i) => {
+    const isLast = i === keys.length - 1;
+    out += `${prefix}${isLast ? '└── ' : '├── '}${key}/\n`;
+    out += renderFolderTree(node[key], prefix + (isLast ? '    ' : '│   '));
+  });
+  return out;
+}
+
+/** Full "## Folder Structure" block, rendered fresh from a path list. */
+function folderStructureBlock(paths) {
+  const tree = buildFolderTree(paths);
+  const rendered = renderFolderTree(tree).trimEnd();
+  return `## Folder Structure\n\n\`\`\`\n${rendered}\n\`\`\``;
 }
 
 // ── Checklist block (for sections the bot can't auto-write) ──────────────────
@@ -206,6 +222,6 @@ module.exports = {
   envTableRow, configSection,
   techStackTableRow, techStackSection,
   usageEntry, usageSection,
-  folderEntry, folderSection,
+  buildFolderTree, renderFolderTree, folderStructureBlock,
   checklistBlock,
 };

@@ -1,17 +1,5 @@
-/**
- * Applies a list of classified changes to README content.
- * KEY DESIGN RULE: only the section affected by each change is touched.
- * Everything else is preserved byte-for-byte.
- *
- * Flow per change:
- *   1. Parse README into sections
- *   2. Find the section relevant to this change type
- *   3. Make a surgical splice into that section's lines
- *   4. Re-join and return the updated content
- *
- * Processes changes one at a time and re-parses between them so line
- * indices always reflect the current state of the document.
- */
+
+
 
 const { parseReadme, findSection, getSectionEnd } = require('./parser');
 const {
@@ -19,7 +7,7 @@ const {
   envTableRow, configSection,
   techStackTableRow, techStackSection,
   usageEntry, usageSection,
-  folderEntry, folderSection,
+  folderStructureBlock,
   checklistBlock,
 } = require('./generators');
 const { findMissingSections } = require('./sectionAudit');
@@ -28,6 +16,9 @@ const CHECKLIST_START = '<!-- readme-sync-bot:checklist:start -->';
 const CHECKLIST_END   = '<!-- readme-sync-bot:checklist:end -->';
 const TOC_START        = '<!-- readme-sync-bot:toc:start -->';
 const TOC_END          = '<!-- readme-sync-bot:toc:end -->';
+const FOLDERS_START    = '<!-- readme-sync-bot:folders:start -->';
+const FOLDERS_END      = '<!-- readme-sync-bot:folders:end -->';
+const FOLDERS_DATA_RE  = /<!-- readme-sync-bot:folders:data:(.*?) -->/;
 
 // Detects heading-style API entries: ### GET /path
 const API_HEADING_RE = /^#{2,4}\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+`?(\S+?)`?$/i;
@@ -74,7 +65,9 @@ function applyOne(content, change) {
     case 'REMOVED_DEPENDENCY': return removeDependency(content, change);
     case 'NEW_SCRIPT':         return addScript(content, change);
     case 'REMOVED_SCRIPT':     return removeScript(content, change);
-    case 'NEW_FOLDER':         return addFolder(content, change);
+    // NEW_FOLDER is deliberately NOT handled here — folder paths accumulate
+    // into a whole-tree rebuild via syncFolderStructure(), not a one-line
+    // insert like everything else. See bot.js for how it's called.
     default: return { content, changed: false, description: '' };
   }
 }
@@ -381,32 +374,54 @@ function removeScript(content, change) {
   return { content, changed: false, description: '' };
 }
 
-// ─── Folder Structure changes ───────────────────────────────────────────────────
+// ─── Folder Structure (accumulated tree, rebuilt fresh every run) ──────────────
 
-function addFolder(content, change) {
-  const { sections, lines } = parseReadme(content);
-  const existingFolderSection = findSection(sections, 'folders');
+/**
+ * Merge newly-detected folder paths into the full set the bot has ever seen
+ * (stored invisibly in a data comment) and re-render the whole tree from
+ * that set. This is why it can "arrange" folders properly regardless of
+ * what order they were created in — every run rebuilds the complete
+ * hierarchy from the full accumulated list, not just today's diff.
+ *
+ * @param {string} content
+ * @param {string[]} newPaths — folder paths detected in this diff, e.g. ['assets/']
+ * @returns {{ content: string, added: string[] }}
+ */
+function syncFolderStructure(content, newPaths) {
+  const startIdx = content.indexOf(FOLDERS_START);
+  const endIdx   = content.indexOf(FOLDERS_END);
 
-  if (!existingFolderSection) {
-    return {
-      content: content.trimEnd() + '\n' + folderSection([change]),
-      changed: true,
-      description: `Added \`${change.path}\` (created new Folder Structure section)`,
-    };
+  let knownPaths = [];
+  let stripped = content;
+
+  if (startIdx !== -1 && endIdx !== -1) {
+    const block = content.slice(startIdx, endIdx + FOLDERS_END.length);
+    const m = FOLDERS_DATA_RE.exec(block);
+    if (m) {
+      try { knownPaths = JSON.parse(m[1]); } catch { knownPaths = []; }
+    }
+    const before = content.slice(0, startIdx).replace(/\n+$/, '\n');
+    const after  = content.slice(endIdx + FOLDERS_END.length).replace(/^\n+/, '\n');
+    stripped = (before + after).replace(/\n{3,}/g, '\n\n');
   }
 
-  const endLine = getSectionEnd(existingFolderSection, sections, lines.length);
-  const sectionLines = lines.slice(existingFolderSection.startLine, endLine + 1);
+  const merged = new Set(knownPaths);
+  const added = [];
+  newPaths.forEach(p => {
+    if (!merged.has(p)) {
+      merged.add(p);
+      added.push(p);
+    }
+  });
 
-  if (sectionLines.some(l => l.includes(change.path))) {
-    return { content, changed: false, description: '' };
-  }
+  const allPaths     = Array.from(merged).sort();
+  const treeBlock     = folderStructureBlock(allPaths);
+  const dataComment  = `<!-- readme-sync-bot:folders:data:${JSON.stringify(allPaths)} -->`;
+  const fullBlock    = `${FOLDERS_START}\n${treeBlock}\n${dataComment}\n${FOLDERS_END}\n`;
 
-  lines.splice(endLine + 1, 0, folderEntry(change));
   return {
-    content: lines.join('\n'),
-    changed: true,
-    description: `Added \`${change.path}\` to Folder Structure section`,
+    content: stripped.trimEnd() + '\n\n' + fullBlock,
+    added,
   };
 }
 
@@ -498,4 +513,4 @@ function syncChecklist(content) {
   };
 }
 
-module.exports = { applyChanges, syncChecklist, syncTOC };
+module.exports = { applyChanges, syncChecklist, syncTOC, syncFolderStructure };
