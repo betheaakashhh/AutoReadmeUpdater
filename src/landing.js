@@ -377,6 +377,8 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
   }
   .readme-preview .rp-added { background: rgba(74, 194, 107, 0.08); color: var(--add); display: block; margin: 0 -16px; padding: 0 16px; }
   .readme-preview .rp-muted { color: var(--muted); }
+  .readme-preview .rp-marker-inline { color: var(--add-dim); }
+  .readme-preview .rp-added.rp-marker { color: var(--add-dim); }
   .readme-preview .rp-note {
     margin-top: 10px;
     padding: 8px 10px;
@@ -810,6 +812,12 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
     return false;
   }
 
+  function isValidFolderId(id) {
+    if (!id) return false;
+    var n = findNode(tree, id);
+    return !!(n && n.type === 'folder');
+  }
+
   function markDirty() {
     dirty = true;
     staged = false;
@@ -928,7 +936,7 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
     yes.addEventListener('click', function (e) {
       e.stopPropagation();
       removeNode(tree, node.id);
-      if (selectedFolderId === node.id) selectedFolderId = 'f1';
+      if (!isValidFolderId(selectedFolderId)) selectedFolderId = null;
       confirmDeleteId = null;
       markDirty();
       renderTree();
@@ -1054,6 +1062,8 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
     ''
   ];
 
+  var apiRoutes = [];
+
   function renderPreviewBase() {
     readmePreviewEl.innerHTML = '';
     BASE_README_LINES.forEach(function (line) {
@@ -1064,26 +1074,46 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
     });
   }
 
-  function renderPreviewWithRoute(route) {
+  function appendPreviewLine(text, cls) {
+    var div = document.createElement('div');
+    div.className = cls;
+    div.textContent = text || String.fromCharCode(160);
+    readmePreviewEl.appendChild(div);
+  }
+
+  function appendHeadingWithMarker(headingText, markerText) {
+    var div = document.createElement('div');
+    div.className = 'rp-added';
+    var headSpan = document.createElement('span');
+    headSpan.textContent = headingText;
+    div.appendChild(headSpan);
+    var markSpan = document.createElement('span');
+    markSpan.className = 'rp-marker-inline';
+    markSpan.textContent = ' ' + markerText;
+    div.appendChild(markSpan);
+    readmePreviewEl.appendChild(div);
+  }
+
+  // Mirrors how real doc-sync bots keep updates idempotent: everything the
+  // bot owns lives between a start/end marker comment, so a later push
+  // updates the same block in place instead of appending a duplicate one.
+  function renderPreviewWithApiSection() {
     renderPreviewBase();
-    var added = [
-      '',
-      '## API',
-      '',
-      '| Method | Endpoint | Description |',
-      '|--------|----------|-------------|',
-      '| ' + route.method + ' | ' + route.path + ' | — |'
-    ];
-    added.forEach(function (line) {
-      var div = document.createElement('div');
-      div.className = 'rp-added';
-      div.textContent = line || String.fromCharCode(160);
-      readmePreviewEl.appendChild(div);
+    if (!apiRoutes.length) return;
+    appendPreviewLine('', 'rp-added');
+    appendHeadingWithMarker('## API', '<!-- readme-sync-bot:start:api -->');
+    appendPreviewLine('', 'rp-added');
+    appendPreviewLine('| Method | Endpoint | Description |', 'rp-added');
+    appendPreviewLine('|--------|----------|-------------|', 'rp-added');
+    apiRoutes.forEach(function (r) {
+      appendPreviewLine('| ' + r.method + ' | ' + r.path + ' | — |', 'rp-added');
     });
+    appendPreviewLine('', 'rp-added');
+    appendPreviewLine('<!-- readme-sync-bot:end:api -->', 'rp-added rp-marker');
   }
 
   function renderPreviewWithNote(text) {
-    renderPreviewBase();
+    renderPreviewWithApiSection();
     var note = document.createElement('div');
     note.className = 'rp-note';
     note.textContent = text;
@@ -1140,9 +1170,20 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
     var route = lang === 'javascript' ? detectRoute(codeEditorEl.value) : null;
 
     if (route) {
-      logLine('detected: ' + route.method + ' ' + route.path + ' (93% confidence)', 'tl-info');
-      logLine('README.md updated & committed', 'tl-ok');
-      renderPreviewWithRoute(route);
+      var existing = null;
+      for (var i = 0; i < apiRoutes.length; i++) {
+        if (apiRoutes[i].path === route.path && apiRoutes[i].method === route.method) { existing = apiRoutes[i]; break; }
+      }
+      if (existing) {
+        existing.method = route.method;
+        logLine('detected: ' + route.method + ' ' + route.path + ' (93% confidence, already documented)', 'tl-info');
+        logLine('existing entry updated in place — inside the readme-sync-bot:api markers', 'tl-ok');
+      } else {
+        apiRoutes.push({ method: route.method, path: route.path });
+        logLine('detected: ' + route.method + ' ' + route.path + ' (93% confidence)', 'tl-info');
+        logLine('README.md updated & committed — inside readme-sync-bot:api markers', 'tl-ok');
+      }
+      renderPreviewWithApiSection();
       updateBadge('auto-committed · 93%', 'updated');
     } else if (lastFeatureFolder) {
       logLine('detected: new directory src/' + lastFeatureFolder + '/ (75% confidence)', 'tl-info');
@@ -1152,12 +1193,12 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
     } else if (lang !== 'javascript') {
       logLine('detection is tuned for JavaScript route handlers right now', 'tl-info');
       logLine('README.md left untouched', '');
-      renderPreviewBase();
+      renderPreviewWithApiSection();
       updateBadge('no change detected', null);
     } else {
       logLine('no route or feature-directory change detected', 'tl-info');
       logLine('README.md left untouched', '');
-      renderPreviewBase();
+      renderPreviewWithApiSection();
       updateBadge('no change detected', null);
     }
 
