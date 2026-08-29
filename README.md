@@ -1,5 +1,29 @@
 # README Sync Bot
 
+<!-- readme-sync-bot:toc:start -->
+## Table of Contents
+
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Folder Structure](#folder-structure)
+- [How It Works](#how-it-works)
+- [What It Detects](#what-it-detects)
+- [What It Ignores](#what-it-ignores)
+- [Who Gets What](#who-gets-what)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Environment Variables](#environment-variables)
+- [Running Locally](#running-locally)
+- [HTTP Routes](#http-routes)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Extending](#extending)
+- [Contributing](#contributing)
+- [License](#license)
+- [Author](#author)
+- [📋 Recommended Sections Checklist](#-recommended-sections-checklist)
+<!-- readme-sync-bot:toc:end -->
+
 [![Docs: Auto-updated](https://img.shields.io/badge/docs-auto--updated-4AC26B?style=flat-square)](https://github.com/betheaakashhh/AutoReadmeUpdater)
 [![Built with Probot](https://img.shields.io/badge/built%20with-probot-E3B341?style=flat-square)](https://probot.github.io/)
 [![No AI](https://img.shields.io/badge/no-AI%20API-0B0E14?style=flat-square)](https://github.com/betheaakashhh/AutoReadmeUpdater)
