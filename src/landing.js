@@ -639,7 +639,7 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
           <option value="python">Python</option>
           <option value="other">Other</option>
         </select>
-        <span id="activeFileLabel">src/routes/orders.js</span>
+        <span id="activeFileLabel">src/analyzers/routes.js</span>
       </div>
       <textarea class="code-editor" id="codeEditor" spellcheck="false"></textarea>
     </div>
@@ -762,12 +762,23 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
 
   var initialTree = [
     { id: 'f1', type: 'folder', name: 'src', open: true, children: [
-      { id: 'f2', type: 'folder', name: 'routes', open: true, children: [
-        { id: 'f3', type: 'file', name: 'orders.js' }
+      { id: 'f2', type: 'file', name: 'server.js' },
+      { id: 'f3', type: 'file', name: 'bot.js' },
+      { id: 'f4', type: 'file', name: 'landing.js' },
+      { id: 'f5', type: 'file', name: 'permissions.js' },
+      { id: 'f6', type: 'file', name: 'classifier.js' },
+      { id: 'f7', type: 'folder', name: 'analyzers', open: true, children: [
+        { id: 'f8', type: 'file', name: 'routes.js' },
+        { id: 'f9', type: 'file', name: 'env.js' },
+        { id: 'f10', type: 'file', name: 'features.js' }
       ] },
-      { id: 'f4', type: 'file', name: 'server.js' }
+      { id: 'f11', type: 'folder', name: 'readme', open: true, children: [
+        { id: 'f12', type: 'file', name: 'parser.js' },
+        { id: 'f13', type: 'file', name: 'generators.js' },
+        { id: 'f14', type: 'file', name: 'updater.js' }
+      ] }
     ] },
-    { id: 'f5', type: 'file', name: 'README.md' }
+    { id: 'f15', type: 'file', name: 'README.md' }
   ];
 
   var tree = JSON.parse(JSON.stringify(initialTree));
@@ -1055,6 +1066,23 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
   }
 
   var BASE_README_LINES = [
+    '## Folder Structure',
+    '',
+    'src/',
+    '├── server.js          Express entry point',
+    '├── bot.js             Push & PR event handlers',
+    '├── landing.js         Landing page HTML',
+    '├── permissions.js     Owner / admin check',
+    '├── classifier.js      Scores & routes each change',
+    '├── analyzers/',
+    '│   ├── routes.js      Route change detection',
+    '│   ├── env.js         .env.example detection',
+    '│   └── features.js    New feature directories',
+    '└── readme/',
+    '    ├── parser.js      Splits README by heading',
+    '    ├── generators.js  Markdown templates',
+    '    └── updater.js     Applies the edit',
+    '',
     '## What it ignores',
     '',
     '- Test files, CI config, CHANGELOG',
@@ -1062,7 +1090,9 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
     ''
   ];
 
-  var apiRoutes = [];
+  var apiRoutes = [
+    { method: 'GET', path: '/api/orders' }
+  ];
 
   function renderPreviewBase() {
     readmePreviewEl.innerHTML = '';
@@ -1220,8 +1250,8 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
     codeEditorEl.addEventListener('input', markDirty);
     langSelectEl.addEventListener('change', function () {
       activeFileLabelEl.textContent = langSelectEl.value === 'javascript'
-        ? 'src/routes/orders.js'
-        : (langSelectEl.value === 'python' ? 'src/routes/orders.py' : 'src/routes/orders.txt');
+        ? 'src/analyzers/routes.js'
+        : (langSelectEl.value === 'python' ? 'src/analyzers/routes.py' : 'src/analyzers/routes.txt');
       markDirty();
     });
   });
@@ -1233,7 +1263,7 @@ const LANDING_PAGE_HTML = `<!DOCTYPE html>
 
   safeInit('tree-render', function () {
     renderTree();
-    renderPreviewBase();
+    renderPreviewWithApiSection();
   });
 
   safeInit('terminal', function () {
